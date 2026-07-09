@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLVM-C Cheat Sheet — Compiler Development Guide</title>
+<link rel="preconnect" href="https://cdnjs.cloudflare.com">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/nord.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/cpp.min.js"></script>
+<style>
+  :root{
+    --bg:        #0d1013;
+    --bg-raised: #14181d;
+    --bg-code:   #10141a;
+    --line:      #232a32;
+    --text:      #d7dce2;
+    --text-dim:  #838f9c;
+    --text-mute: #57626d;
+    --accent:    #e8a23d;   /* amber — signal/status lamp */
+    --accent-2:  #4fb3a9;   /* teal — secondary, IR/wire tone */
+    --danger:    #d9704f;
+    --sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --mono: 'IBM Plex Mono', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @font-face{
+    font-family:'IBM Plex Sans';
+    src: local('IBM Plex Sans');
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:var(--sans);
+    font-size:15.5px;
+    line-height:1.65;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  /* Subtle circuit-board grid backdrop */
+  body::before{
+    content:"";
+    position:fixed; inset:0;
+    background-image:
+      linear-gradient(var(--line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--line) 1px, transparent 1px);
+    background-size: 64px 64px;
+    opacity:0.06;
+    pointer-events:none;
+    z-index:0;
+  }
+
+  .layout{
+    display:grid;
+    grid-template-columns: 280px minmax(0,1fr);
+    max-width:1360px;
+    margin:0 auto;
+    position:relative;
+    z-index:1;
+  }
+
+  /* ---------- Sidebar ---------- */
+  nav.toc{
+    position:sticky;
+    top:0;
+    height:100vh;
+    overflow-y:auto;
+    padding:32px 20px 40px 32px;
+    border-right:1px solid var(--line);
+  }
+  .toc-brand{
+    font-family:var(--mono);
+    font-size:11px;
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+    color:var(--accent);
+    margin-bottom:4px;
+  }
+  .toc-title{
+    font-size:17px;
+    font-weight:600;
+    color:var(--text);
+    margin:0 0 24px;
+    line-height:1.35;
+  }
+  .toc ol{
+    list-style:none;
+    margin:0; padding:0;
+    counter-reset:sec;
+  }
+  .toc li{
+    counter-increment:sec;
+  }
+  .toc a{
+    display:flex;
+    gap:10px;
+    align-items:baseline;
+    padding:6px 8px;
+    margin:1px 0;
+    border-radius:6px;
+    color:var(--text-dim);
+    text-decoration:none;
+    font-size:13.2px;
+    transition:background .15s, color .15s;
+  }
+  .toc a::before{
+    content:counter(sec, decimal-leading-zero);
+    font-family:var(--mono);
+    font-size:11px;
+    color:var(--text-mute);
+    flex-shrink:0;
+    padding-top:1px;
+  }
+  .toc a:hover{ background:var(--bg-raised); color:var(--text); }
+  .toc a.active{ background:var(--bg-raised); color:var(--accent); }
+  .toc a.active::before{ color:var(--accent); }
+
+  /* ---------- Main content ---------- */
+  main{
+    padding:56px 56px 120px;
+    min-width:0;
+  }
+  header.hero{
+    margin-bottom:56px;
+    padding-bottom:32px;
+    border-bottom:1px solid var(--line);
+  }
+  .eyebrow{
+    font-family:var(--mono);
+    font-size:12px;
+    letter-spacing:0.16em;
+    text-transform:uppercase;
+    color:var(--accent-2);
+    display:flex;
+    align-items:center;
+    gap:10px;
+    margin-bottom:18px;
+  }
+  .eyebrow .dot{
+    width:7px;height:7px;border-radius:50%;
+    background:var(--accent);
+    box-shadow:0 0 8px 1px var(--accent);
+  }
+  h1.hero-title{
+    font-size:clamp(30px, 4vw, 44px);
+    line-height:1.12;
+    margin:0 0 16px;
+    font-weight:650;
+    letter-spacing:-0.01em;
+    color:#f2f4f6;
+  }
+  h1.hero-title em{
+    font-style:normal;
+    color:var(--accent);
+  }
+  .hero-sub{
+    max-width:640px;
+    color:var(--text-dim);
+    font-size:16px;
+  }
+  .quickcmd{
+    margin-top:24px;
+    display:inline-flex;
+    align-items:center;
+    gap:10px;
+    background:var(--bg-code);
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:10px 16px;
+    font-family:var(--mono);
+    font-size:13px;
+    color:var(--accent-2);
+  }
+
+  section.card{
+    margin-bottom:64px;
+    scroll-margin-top:24px;
+  }
+  section.card h2{
+    display:flex;
+    align-items:center;
+    gap:14px;
+    font-size:22px;
+    font-weight:600;
+    color:#f2f4f6;
+    margin:0 0 8px;
+  }
+  section.card h2 .num{
+    font-family:var(--mono);
+    font-size:13px;
+    color:var(--bg);
+    background:var(--accent);
+    padding:3px 8px;
+    border-radius:5px;
+    font-weight:700;
+  }
+  section.card > p.desc{
+    color:var(--text-dim);
+    margin:0 0 22px;
+    max-width:760px;
+  }
+
+  h3.sub{
+    font-size:14px;
+    font-weight:600;
+    color:var(--accent-2);
+    text-transform:uppercase;
+    letter-spacing:0.05em;
+    margin:28px 0 10px;
+  }
+
+  pre{
+    background:var(--bg-code);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:18px 20px;
+    overflow-x:auto;
+    margin:0 0 18px;
+    position:relative;
+  }
+  pre code.hljs{
+    background:transparent;
+    padding:0;
+    font-family:var(--mono);
+    font-size:13px;
+    line-height:1.6;
+  }
+  code:not(.hljs){
+    font-family:var(--mono);
+    background:var(--bg-raised);
+    border:1px solid var(--line);
+    padding:1px 6px;
+    border-radius:5px;
+    font-size:0.88em;
+    color:var(--accent-2);
+  }
+
+  .copy-btn{
+    position:absolute;
+    top:10px; right:10px;
+    font-family:var(--mono);
+    font-size:11px;
+    color:var(--text-dim);
+    background:var(--bg-raised);
+    border:1px solid var(--line);
+    border-radius:6px;
+    padding:4px 9px;
+    cursor:pointer;
+    opacity:0;
+    transition:opacity .15s, color .15s, border-color .15s;
+  }
+  pre:hover .copy-btn{ opacity:1; }
+  .copy-btn:hover{ color:var(--accent); border-color:var(--accent); }
+
+  table{
+    width:100%;
+    border-collapse:collapse;
+    margin:0 0 20px;
+    font-size:14px;
+  }
+  th,td{
+    text-align:left;
+    padding:10px 14px;
+    border-bottom:1px solid var(--line);
+  }
+  th{
+    color:var(--text-mute);
+    font-family:var(--mono);
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:0.06em;
+    font-weight:500;
+  }
+  td code{ white-space:nowrap; }
+  tr:last-child td{ border-bottom:none; }
+
+  .pipeline{
+    display:flex;
+    flex-wrap:wrap;
+    gap:0;
+    align-items:center;
+    font-family:var(--mono);
+    font-size:12.5px;
+    background:var(--bg-code);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:20px;
+    margin:16px 0 0;
+  }
+  .pipeline .step{
+    background:var(--bg-raised);
+    border:1px solid var(--line);
+    border-radius:7px;
+    padding:7px 12px;
+    color:var(--text);
+    white-space:nowrap;
+  }
+  .pipeline .arrow{
+    color:var(--text-mute);
+    padding:0 8px;
+  }
+
+  .phase-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fit, minmax(220px,1fr));
+    gap:16px;
+    margin:20px 0 8px;
+  }
+  .phase{
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:18px;
+    background:var(--bg-raised);
+  }
+  .phase .tag{
+    font-family:var(--mono);
+    font-size:10.5px;
+    text-transform:uppercase;
+    letter-spacing:0.08em;
+    padding:2px 8px;
+    border-radius:4px;
+    display:inline-block;
+    margin-bottom:10px;
+  }
+  .phase.front .tag{ background:rgba(232,162,61,0.15); color:var(--accent); }
+  .phase.mid .tag{ background:rgba(79,179,169,0.15); color:var(--accent-2); }
+  .phase.back .tag{ background:rgba(217,112,79,0.15); color:var(--danger); }
+  .phase.support .tag{ background:rgba(131,143,156,0.15); color:var(--text-dim); }
+  .phase ul{ margin:0; padding-left:18px; color:var(--text-dim); font-size:13.5px; }
+  .phase ul li{ margin-bottom:5px; }
+  .phase h4{ margin:0 0 4px; font-size:14.5px; color:var(--text); }
+
+  .note{
+    border-left:3px solid var(--accent);
+    background:var(--bg-raised);
+    padding:12px 18px;
+    border-radius:0 8px 8px 0;
+    color:var(--text-dim);
+    font-size:13.8px;
+    margin:0 0 18px;
+  }
+  .note strong{ color:var(--accent); }
+
+  footer{
+    border-top:1px solid var(--line);
+    padding-top:24px;
+    color:var(--text-mute);
+    font-size:12.5px;
+    font-family:var(--mono);
+  }
+
+  a.inline{ color:var(--accent-2); }
+
+  @media (max-width: 900px){
+    .layout{ grid-template-columns:1fr; }
+    nav.toc{ position:relative; height:auto; border-right:none; border-bottom:1px solid var(--line); }
+    main{ padding:40px 24px 100px; }
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    html{ scroll-behavior:auto; }
+    *{ transition:none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+  <nav class="toc" aria-label="Table of contents">
+    <div class="toc-brand">// reference</div>
+    <div class="toc-title">LLVM-C Cheat Sheet</div>
+    <ol id="toc-list">
+      <li><a href="#setup">Setup</a></li>
+      <li><a href="#core">The Big Four Objects</a></li>
+      <li><a href="#types">Types</a></li>
+      <li><a href="#functions">Functions &amp; Basic Blocks</a></li>
+      <li><a href="#instructions">Instructions Reference</a></li>
+      <li><a href="#verify">Verification</a></li>
+      <li><a href="#passes">Optimization Passes</a></li>
+      <li><a href="#target">Target Machine &amp; Codegen</a></li>
+      <li><a href="#jit">JIT Execution</a></li>
+      <li><a href="#errors">Error Handling</a></li>
+      <li><a href="#debuginfo">Debug Info (DWARF)</a></li>
+      <li><a href="#anatomy">Anatomy of a Full Compiler</a></li>
+      <li><a href="#memory">Memory Management</a></li>
+      <li><a href="#minimal">Minimal Compilable Program</a></li>
+      <li><a href="#resources">Resources</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <header class="hero">
+      <div class="eyebrow"><span class="dot"></span> LLVM-C API · reference &amp; build guide</div>
+      <h1 class="hero-title">Everything the C API gives you —<br><em>and everything it doesn't.</em></h1>
+      <p class="hero-sub">A working reference for <code>llvm-c/*.h</code>: IR construction, verification, optimization, codegen, and JIT — plus the full parts list for a compiler that actually ships.</p>
+      <div class="quickcmd">$ clang myc.c $(llvm-config --cflags --libs core native) -o myc</div>
+    </header>
+
+    <section class="card" id="setup">
+      <h2><span class="num">01</span> Setup</h2>
+      <p class="desc">Locate flags with <code>llvm-config</code>, then pull in the headers you need.</p>
+      <pre><code class="language-bash"># Find flags/libs for your LLVM install
+llvm-config --version
+llvm-config --cflags
+llvm-config --libs core analysis executionengine mcjit interpreter native
+llvm-config --system-libs
+
+# Compile example
+clang myc.c $(llvm-config --cflags --libs core native) $(llvm-config --system-libs) -o myc</code></pre>
+      <h3 class="sub">Core headers</h3>
+      <pre><code class="language-cpp">#include &lt;llvm-c/Core.h&gt;          // IR building: types, values, instructions
+#include &lt;llvm-c/Analysis.h&gt;      // module/function verification
+#include &lt;llvm-c/Target.h&gt;        // target init
+#include &lt;llvm-c/TargetMachine.h&gt; // codegen, object emission
+#include &lt;llvm-c/Transforms/PassBuilder.h&gt; // new-PM optimization passes
+#include &lt;llvm-c/ExecutionEngine.h&gt; // JIT execution (or llvm-c/Orc.h / OrcEE.h / LLJIT.h)
+#include &lt;llvm-c/BitWriter.h&gt;     // emit .bc bitcode
+#include &lt;llvm-c/DebugInfo.h&gt;     // DWARF debug info (DIBuilder-C)
+#include &lt;llvm-c/Error.h&gt;         // LLVMErrorRef handling</code></pre>
+    </section>
+
+    <section class="card" id="core">
+      <h2><span class="num">02</span> The Big Four Objects</h2>
+      <p class="desc">Everything else in this document is built on top of these four handles.</p>
+      <table>
+        <tr><th>Object</th><th>Type</th><th>Purpose</th></tr>
+        <tr><td>Context</td><td><code>LLVMContextRef</code></td><td>Owns types/constants; isolates compilations (thread-safety unit)</td></tr>
+        <tr><td>Module</td><td><code>LLVMModuleRef</code></td><td>A translation unit: globals, functions, IR</td></tr>
+        <tr><td>Builder</td><td><code>LLVMBuilderRef</code></td><td>Cursor that inserts instructions into basic blocks</td></tr>
+        <tr><td>Basic Block</td><td><code>LLVMBasicBlockRef</code></td><td>Straight-line instruction sequence ending in a terminator</td></tr>
+      </table>
+      <pre><code class="language-cpp">LLVMContextRef ctx = LLVMContextCreate();
+LLVMModuleRef  mod = LLVMModuleCreateWithNameInContext("mymodule", ctx);
+LLVMBuilderRef bld = LLVMCreateBuilderInContext(ctx);
+
+// ... build IR ...
+
+LLVMDisposeBuilder(bld);
+LLVMDisposeModule(mod);
+LLVMContextDispose(ctx);</code></pre>
+    </section>
+
+    <section class="card" id="types">
+      <h2><span class="num">03</span> Types</h2>
+      <pre><code class="language-cpp">LLVMTypeRef i1  = LLVMInt1TypeInContext(ctx);
+LLVMTypeRef i8  = LLVMInt8TypeInContext(ctx);
+LLVMTypeRef i32 = LLVMInt32TypeInContext(ctx);
+LLVMTypeRef i64 = LLVMInt64TypeInContext(ctx);
+LLVMTypeRef f32 = LLVMFloatTypeInContext(ctx);
+LLVMTypeRef f64 = LLVMDoubleTypeInContext(ctx);
+LLVMTypeRef voidTy = LLVMVoidTypeInContext(ctx);
+
+LLVMTypeRef ptr   = LLVMPointerTypeInContext(ctx, /*addrspace*/0); // opaque ptr (LLVM 15+)
+LLVMTypeRef arr   = LLVMArrayType2(i32, 10);
+LLVMTypeRef vec   = LLVMVectorType(f32, 4);
+
+// Struct (named or literal)
+LLVMTypeRef fields[] = { i32, f64 };
+LLVMTypeRef structTy = LLVMStructTypeInContext(ctx, fields, 2, /*packed*/0);
+
+LLVMTypeRef named = LLVMStructCreateNamed(ctx, "Point");
+LLVMStructSetBody(named, fields, 2, 0);
+
+// Function type: i32 f(i32, i32)
+LLVMTypeRef params[] = { i32, i32 };
+LLVMTypeRef fnTy = LLVMFunctionType(i32, params, 2, /*isVarArg*/0);</code></pre>
+    </section>
+
+    <section class="card" id="functions">
+      <h2><span class="num">04</span> Functions &amp; Basic Blocks</h2>
+      <pre><code class="language-cpp">LLVMValueRef fn = LLVMAddFunction(mod, "add", fnTy);
+LLVMSetLinkage(fn, LLVMExternalLinkage);
+
+LLVMBasicBlockRef entry = LLVMAppendBasicBlockInContext(ctx, fn, "entry");
+LLVMPositionBuilderAtEnd(bld, entry);
+
+LLVMValueRef a = LLVMGetParam(fn, 0);
+LLVMValueRef b = LLVMGetParam(fn, 1);
+LLVMSetValueName2(a, "a", 1);
+
+LLVMValueRef sum = LLVMBuildAdd(bld, a, b, "sum");
+LLVMBuildRet(bld, sum);</code></pre>
+      <div class="note">Other useful block ops: <code>LLVMInsertBasicBlock</code>, <code>LLVMMoveBasicBlockAfter</code>, <code>LLVMDeleteBasicBlock</code>, <code>LLVMGetBasicBlockTerminator</code>.</div>
+    </section>
+
+    <section class="card" id="instructions">
+      <h2><span class="num">05</span> Instructions Reference</h2>
+
+      <h3 class="sub">Arithmetic</h3>
+      <pre><code class="language-cpp">LLVMBuildAdd / LLVMBuildFAdd
+LLVMBuildSub / LLVMBuildFSub
+LLVMBuildMul / LLVMBuildFMul
+LLVMBuildSDiv / LLVMBuildUDiv / LLVMBuildFDiv
+LLVMBuildSRem / LLVMBuildURem / LLVMBuildFRem
+LLVMBuildNeg  / LLVMBuildFNeg
+LLVMBuildNot / LLVMBuildAnd / LLVMBuildOr / LLVMBuildXor
+LLVMBuildShl / LLVMBuildLShr / LLVMBuildAShr</code></pre>
+
+      <h3 class="sub">Comparisons</h3>
+      <pre><code class="language-cpp">LLVMBuildICmp(bld, LLVMIntSLT, a, b, "cmp");  // signed less-than
+LLVMBuildFCmp(bld, LLVMRealOLT, a, b, "cmp"); // ordered less-than
+// LLVMIntPredicate: EQ, NE, SGT, SGE, SLT, SLE, UGT, UGE, ULT, ULE
+// LLVMRealPredicate: OEQ, ONE, OGT, OGE, OLT, OLE, ORD, UNO, etc.</code></pre>
+
+      <h3 class="sub">Memory</h3>
+      <pre><code class="language-cpp">LLVMValueRef v = LLVMBuildAlloca(bld, i32, "x");        // stack alloc
+LLVMBuildStore(bld, val, v);
+LLVMValueRef loaded = LLVMBuildLoad2(bld, i32, v, "x.val"); // typed load (opaque ptrs)
+LLVMValueRef gep = LLVMBuildGEP2(bld, elemTy, base, indices, numIndices, "elt");
+LLVMValueRef global = LLVMAddGlobal(mod, i32, "g");
+LLVMSetInitializer(global, LLVMConstInt(i32, 0, 0));</code></pre>
+
+      <h3 class="sub">Casts</h3>
+      <pre><code class="language-cpp">LLVMBuildTrunc / LLVMBuildZExt / LLVMBuildSExt
+LLVMBuildFPTrunc / LLVMBuildFPExt
+LLVMBuildFPToSI / LLVMBuildFPToUI / LLVMBuildSIToFP / LLVMBuildUIToFP
+LLVMBuildPtrToInt / LLVMBuildIntToPtr
+LLVMBuildBitCast</code></pre>
+
+      <h3 class="sub">Control flow</h3>
+      <pre><code class="language-cpp">LLVMBuildBr(bld, targetBB);
+LLVMBuildCondBr(bld, cond, thenBB, elseBB);
+LLVMValueRef phi = LLVMBuildPhi(bld, i32, "phi");
+LLVMAddIncoming(phi, &amp;val1, &amp;bb1, 1);
+LLVMBuildSwitch(bld, val, defaultBB, numCases);
+LLVMBuildRet(bld, val);
+LLVMBuildRetVoid(bld);
+LLVMBuildUnreachable(bld);</code></pre>
+
+      <h3 class="sub">Calls</h3>
+      <pre><code class="language-cpp">LLVMValueRef args[] = { arg1, arg2 };
+LLVMValueRef call = LLVMBuildCall2(bld, fnTy, fn, args, 2, "calltmp");</code></pre>
+
+      <h3 class="sub">Constants</h3>
+      <pre><code class="language-cpp">LLVMConstInt(i32, 42, /*signExtend*/0);
+LLVMConstReal(f64, 3.14);
+LLVMConstStringInContext(ctx, "hi", 2, /*dontNullTerminate*/0);
+LLVMConstArray2(i32, elems, count);
+LLVMConstNull(ty);
+LLVMGetUndef(ty);</code></pre>
+    </section>
+
+    <section class="card" id="verify">
+      <h2><span class="num">06</span> Verification</h2>
+      <p class="desc">Always verify before optimizing or emitting code — malformed IR otherwise fails silently or crashes deep in a pass.</p>
+      <pre><code class="language-cpp">char *err = NULL;
+if (LLVMVerifyModule(mod, LLVMPrintMessageAction, &amp;err)) {
+    fprintf(stderr, "Invalid IR: %s\n", err);
+}
+LLVMDisposeMessage(err);</code></pre>
+      <h3 class="sub">Dump IR for debugging</h3>
+      <pre><code class="language-cpp">LLVMDumpModule(mod);                 // to stderr
+char *ir = LLVMPrintModuleToString(mod);
+LLVMPrintModuleToFile(mod, "out.ll", &amp;err);</code></pre>
+    </section>
+
+    <section class="card" id="passes">
+      <h2><span class="num">07</span> Optimization Passes <span style="font-weight:400;color:var(--text-mute);font-size:14px;">(New Pass Manager)</span></h2>
+      <pre><code class="language-cpp">#include &lt;llvm-c/Transforms/PassBuilder.h&gt;
+
+LLVMPassBuilderOptionsRef opts = LLVMCreatePassBuilderOptions();
+LLVMErrorRef e = LLVMRunPasses(mod, "default&lt;O2&gt;", targetMachine, opts);
+if (e) {
+    char *msg = LLVMGetErrorMessage(e);
+    fprintf(stderr, "%s\n", msg);
+    LLVMDisposeErrorMessage(msg);
+}
+LLVMDisposePassBuilderOptions(opts);</code></pre>
+      <div class="note">Common pipelines: <code>default&lt;O0&gt;</code>, <code>default&lt;O1&gt;</code>, <code>default&lt;O2&gt;</code>, <code>default&lt;O3&gt;</code>, <code>default&lt;Os&gt;</code>, or a custom comma-separated list like <code>mem2reg,instcombine,simplifycfg</code>.</div>
+    </section>
+
+    <section class="card" id="target">
+      <h2><span class="num">08</span> Target Machine &amp; Object Code Emission</h2>
+      <pre><code class="language-cpp">LLVMInitializeAllTargetInfos();
+LLVMInitializeAllTargets();
+LLVMInitializeAllTargetMCs();
+LLVMInitializeAllAsmParsers();
+LLVMInitializeAllAsmPrinters();
+// Or Native-only variants for a single-target compiler:
+// LLVMInitializeNativeTarget(); LLVMInitializeNativeAsmPrinter();
+
+char *triple = LLVMGetDefaultTargetTriple();
+LLVMTargetRef target;
+char *err = NULL;
+LLVMGetTargetFromTriple(triple, &amp;target, &amp;err);
+
+LLVMTargetMachineRef tm = LLVMCreateTargetMachine(
+    target, triple, "generic", "",
+    LLVMCodeGenLevelDefault, LLVMRelocPIC, LLVMCodeModelDefault);
+
+LLVMSetModuleDataLayout(mod, LLVMCreateTargetDataLayout(tm));
+LLVMSetTarget(mod, triple);
+
+// Emit object file
+LLVMTargetMachineEmitToFile(tm, mod, "out.o", LLVMObjectFile, &amp;err);
+// Or LLVMAssemblyFile for .s
+
+LLVMDisposeTargetMachine(tm);
+LLVMDisposeMessage(triple);</code></pre>
+      <div class="note">Then link with the system linker or simply <code>clang out.o -o program</code>.</div>
+    </section>
+
+    <section class="card" id="jit">
+      <h2><span class="num">09</span> JIT Execution <span style="font-weight:400;color:var(--text-mute);font-size:14px;">(for interpreters / REPLs)</span></h2>
+      <h3 class="sub">Legacy MCJIT — simple, single-module</h3>
+      <pre><code class="language-cpp">#include &lt;llvm-c/ExecutionEngine.h&gt;
+
+LLVMLinkInMCJIT();
+LLVMInitializeNativeTarget();
+LLVMInitializeNativeAsmPrinter();
+
+LLVMExecutionEngineRef engine;
+char *err = NULL;
+LLVMCreateExecutionEngineForModule(&amp;engine, mod, &amp;err);
+
+LLVMGenericValueRef args[] = { LLVMCreateGenericValueOfInt(i32, 5, 0) };
+LLVMGenericValueRef result = LLVMRunFunction(engine, fn, 1, args);
+int r = (int)LLVMGenericValueToInt(result, 0);
+
+LLVMDisposeExecutionEngine(engine); // also disposes mod</code></pre>
+      <div class="note"><strong>Modern ORC v2 / LLJIT</strong> (<code>llvm-c/LLJIT.h</code>, <code>llvm-c/Orc.h</code>) is preferred for real JIT compilers — supports lazy compilation, multi-module setups, and symbol resolution across modules.</div>
+    </section>
+
+    <section class="card" id="errors">
+      <h2><span class="num">10</span> Error Handling</h2>
+      <p class="desc">Newer APIs return <code>LLVMErrorRef</code> instead of the older <code>char*</code> + bool pattern.</p>
+      <pre><code class="language-cpp">LLVMErrorRef err = SomeCall(...);
+if (err) {
+    char *msg = LLVMGetErrorMessage(err); // consumes err
+    fprintf(stderr, "%s\n", msg);
+    LLVMDisposeErrorMessage(msg);
+}</code></pre>
+      <div class="note">Older APIs use a <code>char **errMsg</code> out-parameter, freed with <code>LLVMDisposeMessage</code>.</div>
+    </section>
+
+    <section class="card" id="debuginfo">
+      <h2><span class="num">11</span> Debug Info <span style="font-weight:400;color:var(--text-mute);font-size:14px;">(DWARF)</span></h2>
+      <pre><code class="language-cpp">#include &lt;llvm-c/DebugInfo.h&gt;
+
+LLVMDIBuilderRef dib = LLVMCreateDIBuilder(mod);
+LLVMMetadataRef file = LLVMDIBuilderCreateFile(dib, "main.c", 6, ".", 1);
+LLVMMetadataRef cu = LLVMDIBuilderCreateCompileUnit(
+    dib, LLVMDWARFSourceLanguageC, file, "mycompiler", 10, 0, "", 0,
+    0, "", 0, LLVMDWARFEmissionFull, 0, 0, 0, "", 0, "", 0);
+// ... create subprogram, lexical blocks, variable metadata, attach locations ...
+LLVMDIBuilderFinalize(dib);</code></pre>
+    </section>
+
+    <section class="card" id="anatomy">
+      <h2><span class="num">12</span> Anatomy of a Full-Fledged Compiler</h2>
+      <p class="desc">LLVM-C only covers IR generation, optimization, and codegen — the middle and back end. Everything else is on you.</p>
+
+      <div class="pipeline">
+        <span class="step">source</span><span class="arrow">→</span>
+        <span class="step">lexer</span><span class="arrow">→</span>
+        <span class="step">tokens</span><span class="arrow">→</span>
+        <span class="step">parser</span><span class="arrow">→</span>
+        <span class="step">AST</span><span class="arrow">→</span>
+        <span class="step">sema</span><span class="arrow">→</span>
+        <span class="step">typed AST</span><span class="arrow">→</span>
+        <span class="step">LLVM-C codegen</span><span class="arrow">→</span>
+        <span class="step">LLVM IR</span><span class="arrow">→</span>
+        <span class="step">verify</span><span class="arrow">→</span>
+        <span class="step">optimize</span><span class="arrow">→</span>
+        <span class="step">target machine</span><span class="arrow">→</span>
+        <span class="step">object file</span><span class="arrow">→</span>
+        <span class="step">linker</span><span class="arrow">→</span>
+        <span class="step">executable</span>
+      </div>
+
+      <div class="phase-grid">
+        <div class="phase front">
+          <div class="tag">Front End · you write this</div>
+          <h4>No LLVM involvement</h4>
+          <ul>
+            <li><strong>Lexer</strong> — text → tokens; comments, escapes, literals, line/col tracking</li>
+            <li><strong>Parser</strong> — tokens → AST; recursive descent or Pratt parsing</li>
+            <li><strong>AST / IR structures</strong> — nodes for expressions, statements, declarations</li>
+            <li><strong>Semantic analysis</strong> — symbol tables, scoping, type checking, name resolution, const-folding</li>
+            <li><strong>Diagnostics engine</strong> — source-located errors/warnings, ideally with recovery</li>
+          </ul>
+        </div>
+        <div class="phase mid">
+          <div class="tag">Middle End · LLVM-C does the work</div>
+          <h4>Sections 03–07 apply here</h4>
+          <ul>
+            <li><strong>AST → IR lowering</strong> — walk the AST, emit via <code>LLVMBuilder*</code></li>
+            <li><strong>IR-level correctness</strong> — <code>LLVMVerifyModule</code></li>
+            <li><strong>Optimization</strong> — new-PM pass pipelines</li>
+          </ul>
+        </div>
+        <div class="phase back">
+          <div class="tag">Back End</div>
+          <h4>Sections 08–09 apply here</h4>
+          <ul>
+            <li><strong>Target selection &amp; codegen</strong> — <code>TargetMachine</code></li>
+            <li><strong>Object / assembly emission</strong></li>
+            <li><strong>Linking</strong> — system linker, <code>lld</code>, or shell out to <code>clang</code>/<code>cc</code>; link a runtime if needed (GC, strings, exceptions)</li>
+          </ul>
+        </div>
+        <div class="phase support">
+          <div class="tag">Supporting infrastructure</div>
+          <h4>Ships the product</h4>
+          <ul>
+            <li><strong>Runtime library</strong> — GC, closures, dynamic dispatch, primitives, unwinding</li>
+            <li><strong>Standard library</strong> — language-level built-ins</li>
+            <li><strong>Driver / CLI</strong> — orchestrates lex→parse→sema→codegen→link; flags like <code>-O0..3</code>, <code>-o</code>, <code>-c</code>, <code>-emit-llvm</code></li>
+            <li><strong>Debug info</strong> — DWARF emission for <code>gdb</code>/<code>lldb</code></li>
+            <li><strong>Testing infra</strong> — golden IR tests, <code>FileCheck</code>-style, end-to-end execution</li>
+            <li><strong>JIT / incremental mode</strong> — optional, for REPLs or scripting languages</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" id="memory">
+      <h2><span class="num">13</span> Memory Management Notes</h2>
+      <ul style="color:var(--text-dim); padding-left:20px; margin:0;">
+        <li style="margin-bottom:8px;">Most <code>LLVMDispose*</code> functions release the corresponding object; disposing a Module or ExecutionEngine that owns it also frees owned Functions/BasicBlocks/Values.</li>
+        <li style="margin-bottom:8px;">Strings returned by <code>LLVMPrintModuleToString</code>, error messages, and target triples must be freed with <code>LLVMDisposeMessage</code>.</li>
+        <li style="margin-bottom:8px;"><code>LLVMContextRef</code> should outlive all Types/Values created within it.</li>
+        <li>Values (<code>LLVMValueRef</code>) are not individually disposed — they're owned by their parent Module/Function.</li>
+      </ul>
+    </section>
+
+    <section class="card" id="minimal">
+      <h2><span class="num">14</span> Quick Reference: Minimal Compilable Program</h2>
+      <pre><code class="language-cpp">#include &lt;llvm-c/Core.h&gt;
+#include &lt;llvm-c/Analysis.h&gt;
+#include &lt;llvm-c/TargetMachine.h&gt;
+
+int main() {
+    LLVMContextRef ctx = LLVMContextCreate();
+    LLVMModuleRef mod = LLVMModuleCreateWithNameInContext("m", ctx);
+    LLVMBuilderRef bld = LLVMCreateBuilderInContext(ctx);
+
+    LLVMTypeRef i32 = LLVMInt32TypeInContext(ctx);
+    LLVMTypeRef params[] = { i32, i32 };
+    LLVMTypeRef fnTy = LLVMFunctionType(i32, params, 2, 0);
+    LLVMValueRef fn = LLVMAddFunction(mod, "add", fnTy);
+
+    LLVMBasicBlockRef entry = LLVMAppendBasicBlockInContext(ctx, fn, "entry");
+    LLVMPositionBuilderAtEnd(bld, entry);
+    LLVMValueRef sum = LLVMBuildAdd(bld, LLVMGetParam(fn, 0), LLVMGetParam(fn, 1), "sum");
+    LLVMBuildRet(bld, sum);
+
+    char *err = NULL;
+    LLVMVerifyModule(mod, LLVMPrintMessageAction, &amp;err);
+    LLVMDisposeMessage(err);
+
+    LLVMDumpModule(mod); // prints IR to stderr
+
+    LLVMDisposeBuilder(bld);
+    LLVMDisposeModule(mod);
+    LLVMContextDispose(ctx);
+    return 0;
+}</code></pre>
+    </section>
+
+    <section class="card" id="resources">
+      <h2><span class="num">15</span> Resources</h2>
+      <ul style="color:var(--text-dim); padding-left:20px; margin:0;">
+        <li style="margin-bottom:8px;">Header source of truth: <code>llvm-c/*.h</code> in your LLVM install (<code>llvm-config --includedir</code>)</li>
+        <li style="margin-bottom:8px;"><code>llvm/docs/tutorial/</code> — Kaleidoscope tutorial (C++, but concepts map directly)</li>
+        <li><code>LLVMVerifyFunction</code> / <code>LLVMVerifyModule</code> — run these constantly during development; malformed IR otherwise fails silently</li>
+      </ul>
+    </section>
+
+    <footer>LLVM-C Cheat Sheet · generated reference, not official LLVM documentation</footer>
+  </main>
+</div>
+
+<script>
+  hljs.highlightAll();
+
+  // Copy-to-clipboard buttons on every code block
+  document.querySelectorAll('pre').forEach(function(pre){
+    var btn = document.createElement('button');
+    btn.className = 'copy-btn';
+    btn.type = 'button';
+    btn.textContent = 'copy';
+    btn.addEventListener('click', function(){
+      var code = pre.querySelector('code');
+      navigator.clipboard.writeText(code.innerText).then(function(){
+        btn.textContent = 'copied';
+        setTimeout(function(){ btn.textContent = 'copy'; }, 1400);
+      });
+    });
+    pre.appendChild(btn);
+  });
+
+  // Scrollspy for sidebar TOC
+  var links = Array.from(document.querySelectorAll('#toc-list a'));
+  var sections = links.map(function(a){ return document.querySelector(a.getAttribute('href')); });
+
+  function onScroll(){
+    var pos = window.scrollY + 120;
+    var current = 0;
+    sections.forEach(function(sec, i){
+      if(sec && sec.offsetTop <= pos) current = i;
+    });
+    links.forEach(function(a, i){
+      a.classList.toggle('active', i === current);
+    });
+  }
+  document.addEventListener('scroll', onScroll, { passive:true });
+  onScroll();
+</script>
+</body>
+</html>
