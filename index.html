@@ -378,8 +378,8 @@
       <li><a href="#functions">Functions &amp; Basic Blocks</a></li>
       <li><a href="#instructions">Core Instructions Reference</a></li>
       <li><a href="#ops-extended">Extended Operators</a></li>
-      <li><a href="#memory-access">Access &amp; Assignments</a></li>
-      <li><a href="#declarations">Declarations</a></li>
+      <li><a href="#memory-access">Access, Calls &amp; Pointers</a></li>
+      <li><a href="#declarations">Declarations &amp; Globals</a></li>
       <li><a href="#control-flow">Control Flow</a></li>
       <li><a href="#verify">Verification</a></li>
       <li><a href="#passes">Optimization Passes</a></li>
@@ -512,38 +512,15 @@ LLVMBuildFCmp(bld, LLVMRealOLT, a, b, "cmp"); // ordered less-than
       <pre><code class="language-cpp">LLVMValueRef v = LLVMBuildAlloca(bld, i32, "x");        // stack alloc
 LLVMBuildStore(bld, val, v);
 LLVMValueRef loaded = LLVMBuildLoad2(bld, i32, v, "x.val"); // typed load (opaque ptrs)
-LLVMValueRef gep = LLVMBuildGEP2(bld, elemTy, base, indices, numIndices, "elt");
-LLVMValueRef global = LLVMAddGlobal(mod, i32, "g");
-LLVMSetInitializer(global, LLVMConstInt(i32, 0, 0));</code></pre>
+LLVMValueRef gep = LLVMBuildGEP2(bld, elemTy, base, indices, numIndices, "elt");</code></pre>
 
-      <h3 class="sub">Casts</h3>
+      <h3 class="sub">Casts &amp; Sizes</h3>
       <pre><code class="language-cpp">LLVMBuildTrunc / LLVMBuildZExt / LLVMBuildSExt
 LLVMBuildFPTrunc / LLVMBuildFPExt
 LLVMBuildFPToSI / LLVMBuildFPToUI / LLVMBuildSIToFP / LLVMBuildUIToFP
 LLVMBuildPtrToInt / LLVMBuildIntToPtr
-LLVMBuildBitCast</code></pre>
-
-      <h3 class="sub">Control flow</h3>
-      <pre><code class="language-cpp">LLVMBuildBr(bld, targetBB);
-LLVMBuildCondBr(bld, cond, thenBB, elseBB);
-LLVMValueRef phi = LLVMBuildPhi(bld, i32, "phi");
-LLVMAddIncoming(phi, &amp;val1, &amp;bb1, 1);
-LLVMBuildSwitch(bld, val, defaultBB, numCases);
-LLVMBuildRet(bld, val);
-LLVMBuildRetVoid(bld);
-LLVMBuildUnreachable(bld);</code></pre>
-
-      <h3 class="sub">Calls</h3>
-      <pre><code class="language-cpp">LLVMValueRef args[] = { arg1, arg2 };
-LLVMValueRef call = LLVMBuildCall2(bld, fnTy, fn, args, 2, "calltmp");</code></pre>
-
-      <h3 class="sub">Constants</h3>
-      <pre><code class="language-cpp">LLVMConstInt(i32, 42, /*signExtend*/0);
-LLVMConstReal(f64, 3.14);
-LLVMConstStringInContext(ctx, "hi", 2, /*dontNullTerminate*/0);
-LLVMConstArray2(i32, elems, count);
-LLVMConstNull(ty);
-LLVMGetUndef(ty);</code></pre>
+LLVMBuildBitCast
+LLVMSizeOf(some_type) // Returns value representing byte size (useful for malloc)</code></pre>
     </section>
 
     <section class="card" id="ops-extended">
@@ -577,6 +554,12 @@ LLVMValueRef cmp_ge = LLVMBuildICmp(bld, LLVMIntSGE, a, b, "cmp_ge"); // &gt;= (
 LLVMValueRef cmp_eq = LLVMBuildICmp(bld, LLVMIntEQ,  a, b, "cmp_eq"); // ==
 LLVMValueRef cmp_ne = LLVMBuildICmp(bld, LLVMIntNE,  a, b, "cmp_ne"); // !=</code></pre>
 
+      <h3 class="sub">Ternary Operator (Select)</h3>
+      <p class="desc">For <code>cond ? a : b</code>, use a <code>Select</code> instruction. It avoids branching, meaning the CPU doesn't have to predict paths. Both <code>a</code> and <code>b</code> must already be evaluated.</p>
+      <pre><code class="language-cpp">// Equivalent to: res = cond ? a_val : b_val;
+// 'cond' MUST be an i1 type (boolean). 'a_val' and 'b_val' must match in type.
+LLVMValueRef res = LLVMBuildSelect(bld, cond, a_val, b_val, "ternary_res");</code></pre>
+
       <h3 class="sub">Logical AND / OR (Short-circuiting)</h3>
       <p class="desc">Logical operators like <code>&&</code> and <code>||</code> in C require short-circuiting. You cannot just use <code>LLVMBuildAnd</code>. You must generate basic blocks to skip the right-hand evaluation if the left-hand determines the result.</p>
       <pre><code class="language-cpp">// Example: a && b
@@ -601,24 +584,40 @@ LLVMAddIncoming(phi, &amp;b, &amp;rhs_end, 1);</code></pre>
     </section>
 
     <section class="card" id="memory-access">
-      <h2><span class="num">07</span> Access, Calls &amp; Assignments</h2>
+      <h2><span class="num">07</span> Access, Calls, &amp; Pointers</h2>
 
-      <h3 class="sub">Member Access &amp; Indexing</h3>
-      <pre><code class="language-cpp">// Array Indexing (e.g., arr[i])
-LLVMValueRef indices[] = { LLVMConstInt(i32, 0, 0), index_val };
+      <h3 class="sub">Array Indexing (<code>var[2]</code>)</h3>
+      <p class="desc">To access <code>var[2]</code>, you use the GetElementPtr (GEP) instruction. In LLVM, you must provide <strong>two</strong> indices when indexing an array via a pointer: the first offsets the pointer itself (almost always 0), and the second indexes into the array.</p>
+      <pre><code class="language-cpp">// Assuming 'array_ptr' is a pointer to an array of elements
+LLVMValueRef indices[] = { 
+    LLVMConstInt(i32, 0, 0), // 0th offset of the pointer
+    LLVMConstInt(i32, 2, 0)  // 2nd element of the array
+};
 LLVMValueRef gep = LLVMBuildGEP2(bld, array_ty, array_ptr, indices, 2, "arr_idx");
-LLVMValueRef loaded = LLVMBuildLoad2(bld, elem_ty, gep, "val");
+LLVMValueRef loaded_val = LLVMBuildLoad2(bld, elem_ty, gep, "val");</code></pre>
 
-// Struct Member Access (e.g., struct.field)
-// The index MUST be a constant for StructGEP
-LLVMValueRef field_ptr = LLVMBuildStructGEP2(bld, struct_ty, struct_ptr, field_index, "field");</code></pre>
+      <h3 class="sub">Struct Property Access (<code>var.property</code>)</h3>
+      <p class="desc">To access a property, you use <code>StructGEP</code>. The index refers to the 0-based field order in the struct definition and <strong>must</strong> be a compile-time constant.</p>
+      <pre><code class="language-cpp">// Assuming we want the 2nd property (index 1) of the struct:
+LLVMValueRef field_ptr = LLVMBuildStructGEP2(bld, struct_ty, struct_ptr, 1, "prop_ptr");
+LLVMValueRef field_val = LLVMBuildLoad2(bld, field_ty, field_ptr, "prop_val");</code></pre>
+
+      <h3 class="sub">Pointers (Address-Of <code>&amp;</code> and Dereference <code>*</code>)</h3>
+      <pre><code class="language-cpp">// Address-Of (&amp;var):
+// Variables on the stack (created via LLVMBuildAlloca) ARE already pointers in LLVM.
+LLVMValueRef address_of_var = var_alloca_ptr; 
+
+// Dereference (*ptr):
+// Dereferencing is simply loading the value from the pointer.
+LLVMValueRef deref_val = LLVMBuildLoad2(bld, expected_type, ptr_val, "deref");
+
+// Pointer Assignment (*ptr = val):
+LLVMBuildStore(bld, new_val, ptr_val);</code></pre>
 
       <h3 class="sub">Function Calls</h3>
       <pre><code class="language-cpp">// Direct call
 LLVMValueRef args[] = { arg1, arg2 };
-LLVMValueRef call = LLVMBuildCall2(bld, fn_ty, fn, args, 2, "call_res");
-
-// Postfix operators like x++ / x-- require a Load, Add/Sub 1, Store, returning old val.</code></pre>
+LLVMValueRef call = LLVMBuildCall2(bld, fn_ty, fn, args, 2, "call_res");</code></pre>
 
       <h3 class="sub">Assignments &amp; Compound Assignments</h3>
       <pre><code class="language-cpp">// Normal Assignment: a = b
@@ -631,7 +630,7 @@ LLVMBuildStore(bld, res, a_ptr); // %=, &=, etc. follow the exact same load-op-s
     </section>
 
     <section class="card" id="declarations">
-      <h2><span class="num">08</span> Declarations</h2>
+      <h2><span class="num">08</span> Declarations &amp; Globals</h2>
       <pre><code class="language-cpp">// Struct Declaration (Named, allows recursive definitions)
 LLVMTypeRef my_struct = LLVMStructCreateNamed(ctx, "MyStruct");
 LLVMTypeRef fields[] = { LLVMInt32Type(ctx), LLVMPointerType(ctx, 0) };
@@ -641,7 +640,14 @@ LLVMStructSetBody(my_struct, fields, 2, /*isPacked=*/0);
 LLVMTypeRef param_types[] = { i32, i32 };
 LLVMTypeRef fn_ty = LLVMFunctionType(i32, param_types, 2, /*isVarArg=*/0);
 LLVMValueRef my_fn = LLVMAddFunction(mod, "my_func", fn_ty);
-// Note: To make it an definition, append a BasicBlock. Otherwise, it remains a declaration.</code></pre>
+
+// Global Variable Declaration
+LLVMValueRef global_var = LLVMAddGlobal(mod, i32, "my_global");
+LLVMSetInitializer(global_var, LLVMConstInt(i32, 100, 0));
+
+// Global String Literal (Useful for printf, etc.)
+// This creates a global char array and returns a pointer to it.
+LLVMValueRef str = LLVMBuildGlobalStringPtr(bld, "Hello, World!\n", "str_literal");</code></pre>
     </section>
 
     <section class="card" id="control-flow">
@@ -741,6 +747,26 @@ LLVMPositionBuilderAtEnd(bld, inc_bb);
 LLVMBuildBr(bld, cond_bb); // Loop back
 
 LLVMPositionBuilderAtEnd(bld, end_bb);</code></pre>
+
+      <h3 class="sub">Break, Continue &amp; Return</h3>
+      <p class="desc">In LLVM, <code>break</code> and <code>continue</code> are simply unconditional branches to the loop's end or condition/increment blocks. <strong>Note:</strong> Once you emit a branch or return, the current BasicBlock is terminated. Any instructions emitted immediately after must go into a new block, or they will cause malformed IR.</p>
+      <pre><code class="language-cpp">// return void;
+LLVMBuildRetVoid(bld);
+
+// return x;
+LLVMBuildRet(bld, x_val);
+
+// break; (Inside a loop)
+// Assume 'end_bb' is the basic block for exiting the loop
+LLVMBuildBr(bld, end_bb);
+
+// continue; (Inside a while loop)
+// Branch back to the block that evaluates the loop condition
+LLVMBuildBr(bld, cond_bb);
+
+// continue; (Inside a for loop)
+// Branch back to the block that increments the loop variable
+LLVMBuildBr(bld, inc_bb);</code></pre>
     </section>
 
     <section class="card" id="verify">
